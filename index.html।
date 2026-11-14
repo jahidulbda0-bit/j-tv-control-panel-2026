@@ -1,0 +1,301 @@
+# j-tv-control-panel-2026
+
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#080d0a">
+<title>J TV CONTROL PANEL</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080d0a;color:#e8f5ec;font-family:Arial,sans-serif}
+header{background:#101a14;padding:17px;border-bottom:1px solid #1b3927;display:flex;justify-content:space-between;align-items:center}
+.logo{font-size:19px;font-weight:bold;color:#22c55e}
+main{max-width:950px;margin:auto;padding:18px}
+.card{background:#111b15;border:1px solid #203b2a;border-radius:12px;padding:17px;margin-bottom:16px}
+h2{font-size:17px;margin:0 0 15px;color:#35d477}
+input,select{width:100%;padding:12px;margin:6px 0 13px;background:#09110c;border:1px solid #294432;border-radius:7px;color:white;font-size:14px}
+label{font-size:13px;color:#b7cbbd}
+button{padding:11px 16px;border:0;border-radius:7px;background:#16a34a;color:white;font-weight:bold;cursor:pointer}
+button:hover{background:#15803d}
+.secondary{background:#34443a}
+.danger{background:#b91c1c}
+.hidden{display:none!important}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.stat{background:#102419;border-radius:9px;padding:15px}
+.stat strong{display:block;color:#22c55e;font-size:27px;margin-top:8px}
+.match{border:1px solid #294432;padding:13px;border-radius:9px;margin:10px 0}
+.match h3{margin:0 0 9px;font-size:16px}
+.small{font-size:12px;color:#a8b9ad}
+.actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+#message{font-size:13px;color:#facc15;margin:10px 0}
+@media(min-width:650px){.fields{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}}
+</style>
+</head>
+<body>
+<header>
+ <div class="logo">▶ J TV CONTROL PANEL</div>
+ <button id="logout" class="secondary hidden">Logout</button>
+</header>
+
+<main>
+<div id="loginBox" class="card">
+ <h2>Admin Login</h2>
+ <label>Admin Password</label>
+ <input id="password" type="password" placeholder="Enter admin password">
+ <button id="loginBtn">LOGIN</button>
+ <div id="message"></div>
+</div>
+
+<div id="dashboard" class="hidden">
+ <div class="stats">
+  <div class="stat">TOTAL MATCHES<strong id="total">0</strong></div>
+  <div class="stat">LIVE MATCHES<strong id="live">0</strong></div>
+ </div>
+
+ <div class="card" style="margin-top:16px">
+  <h2 id="formTitle">Add New Match</h2>
+  <form id="matchForm">
+   <div class="fields">
+    <div>
+     <label>Match Title *</label>
+     <input name="title" required placeholder="Example: Argentina vs Brazil">
+    </div>
+    <div>
+     <label>League</label>
+     <input name="league" placeholder="Example: FIFA World Cup">
+    </div>
+    <div>
+     <label>Team 1 Name *</label>
+     <input name="team1" required>
+    </div>
+    <div>
+     <label>Team 1 Logo URL</label>
+     <input name="team1_logo" type="url" placeholder="https://example.com/logo.png">
+    </div>
+    <div>
+     <label>Team 2 Name *</label>
+     <input name="team2" required>
+    </div>
+    <div>
+     <label>Team 2 Logo URL</label>
+     <input name="team2_logo" type="url" placeholder="https://example.com/logo.png">
+    </div>
+    <div>
+     <label>Match Date & Time</label>
+     <input name="match_time" type="datetime-local">
+    </div>
+    <div>
+     <label>Match Status</label>
+     <select name="status">
+      <option value="upcoming">Upcoming</option>
+      <option value="live">Live</option>
+      <option value="finished">Finished</option>
+     </select>
+    </div>
+    <div>
+     <label>Player Type</label>
+     <select name="stream_type">
+      <option value="none">No Player</option>
+      <option value="m3u8">M3U8</option>
+      <option value="embed">Embed</option>
+      <option value="youtube">YouTube</option>
+     </select>
+    </div>
+    <div>
+     <label>Stream / Embed URL</label>
+     <input name="stream_url" type="url" placeholder="https://...">
+    </div>
+   </div>
+   <button type="submit" id="saveBtn">SAVE MATCH</button>
+   <button type="button" id="cancelEdit" class="secondary hidden">CANCEL</button>
+  </form>
+  <div id="message2"></div>
+ </div>
+
+ <div class="card">
+  <h2>Match Management</h2>
+  <button id="refresh" class="secondary">REFRESH MATCHES</button>
+  <div id="matchList"></div>
+ </div>
+</div>
+</main>
+
+<script>
+const API = "https://j-tv-control-api.jahidul-bda0.workers.dev";
+let token = sessionStorage.getItem("jtv_token") || "";
+let editingId = null;
+
+const $ = id => document.getElementById(id);
+const form = $("matchForm");
+
+function escapeHTML(value){
+ return String(value ?? "").replace(/[&<>"']/g, c => ({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+ }[c]));
+}
+
+function showMessage(id,text){
+ $(id).textContent = text;
+}
+
+function setLoggedIn(value){
+ $("loginBox").classList.toggle("hidden",value);
+ $("dashboard").classList.toggle("hidden",!value);
+ $("logout").classList.toggle("hidden",!value);
+}
+
+async function api(path,options={}){
+ const headers = {"Content-Type":"application/json",...(options.headers||{})};
+ if(token) headers.Authorization = "Bearer " + token;
+ const response = await fetch(API + path,{...options,headers});
+ const data = await response.json().catch(()=>({error:"Invalid server response"}));
+ if(!response.ok) throw new Error(data.error || "Request failed");
+ return data;
+}
+
+$("loginBtn").onclick = async ()=>{
+ const password = $("password").value;
+ if(!password) return showMessage("message","Password দিন।");
+ $("loginBtn").disabled = true;
+ try{
+  const result = await api("/api/login",{
+   method:"POST",
+   body:JSON.stringify({password})
+  });
+  token = result.token;
+  sessionStorage.setItem("jtv_token",token);
+  $("password").value = "";
+  showMessage("message","");
+  setLoggedIn(true);
+  await loadMatches();
+ }catch(error){
+  showMessage("message",error.message);
+ }finally{
+  $("loginBtn").disabled = false;
+ }
+};
+
+$("logout").onclick = ()=>{
+ token = "";
+ sessionStorage.removeItem("jtv_token");
+ setLoggedIn(false);
+};
+
+function resetForm(){
+ form.reset();
+ editingId = null;
+ $("formTitle").textContent = "Add New Match";
+ $("saveBtn").textContent = "SAVE MATCH";
+ $("cancelEdit").classList.add("hidden");
+}
+
+$("cancelEdit").onclick = resetForm;
+
+form.onsubmit = async event=>{
+ event.preventDefault();
+ const body = Object.fromEntries(new FormData(form).entries());
+
+ if(!body.match_time) body.match_time = "";
+
+ $("saveBtn").disabled = true;
+ try{
+  if(editingId){
+   await api("/api/matches/"+editingId,{
+    method:"PUT",body:JSON.stringify(body)
+   });
+   showMessage("message2","Match updated successfully!");
+  }else{
+   await api("/api/matches",{
+    method:"POST",body:JSON.stringify(body)
+   });
+   showMessage("message2","Match added successfully!");
+  }
+  resetForm();
+  await loadMatches();
+ }catch(error){
+  showMessage("message2",error.message);
+ }finally{
+  $("saveBtn").disabled = false;
+ }
+};
+
+async function loadMatches(){
+ $("matchList").textContent = "Loading matches...";
+ try{
+  const result = await api("/api/matches");
+  const matches = result.matches || [];
+  $("total").textContent = matches.length;
+  $("live").textContent = matches.filter(m=>m.status==="live").length;
+
+  if(!matches.length){
+   $("matchList").innerHTML = '<p class="small">No matches added yet.</p>';
+   return;
+  }
+
+  $("matchList").innerHTML = matches.map(m=>`
+   <div class="match">
+    <h3>${escapeHTML(m.team1)} VS ${escapeHTML(m.team2)}</h3>
+    <div class="small">${escapeHTML(m.title)} · ${escapeHTML(m.league)}</div>
+    <div class="small">Status: ${escapeHTML(m.status)} | Type: ${escapeHTML(m.stream_type)}</div>
+    <div class="actions">
+     <button data-edit="${Number(m.id)}" class="secondary">EDIT</button>
+     <button data-delete="${Number(m.id)}" class="danger">DELETE</button>
+    </div>
+   </div>
+  `).join("");
+
+  $("matchList").querySelectorAll("[data-edit]").forEach(button=>{
+   button.onclick = ()=>editMatch(matches.find(m=>m.id===Number(button.dataset.edit)));
+  });
+
+  $("matchList").querySelectorAll("[data-delete]").forEach(button=>{
+   button.onclick = ()=>deleteMatch(Number(button.dataset.delete));
+  });
+ }catch(error){
+  $("matchList").textContent = error.message;
+  if(error.message.includes("Unauthorized")){
+   token = "";
+   sessionStorage.removeItem("jtv_token");
+   setLoggedIn(false);
+  }
+ }
+}
+
+function editMatch(match){
+ if(!match) return;
+ editingId = match.id;
+ for(const key of form.elements){
+  if(key.name && match[key.name] !== undefined){
+   key.value = match[key.name] ?? "";
+  }
+ }
+ $("formTitle").textContent = "Edit Match #" + match.id;
+ $("saveBtn").textContent = "UPDATE MATCH";
+ $("cancelEdit").classList.remove("hidden");
+ window.scrollTo({top:0,behavior:"smooth"});
+}
+
+async function deleteMatch(id){
+ if(!confirm("এই ম্যাচটি মুছে ফেলবেন?")) return;
+ try{
+  await api("/api/matches/"+id,{method:"DELETE"});
+  showMessage("message2","Match deleted.");
+  await loadMatches();
+ }catch(error){
+  showMessage("message2",error.message);
+ }
+}
+
+$("refresh").onclick = loadMatches;
+
+if(token){
+ setLoggedIn(true);
+ loadMatches();
+}else{
+ setLoggedIn(false);
+}
+</script>
+</body>
+</html>
